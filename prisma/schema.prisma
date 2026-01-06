@@ -1,0 +1,518 @@
+// Prisma Schema - Empregos RMC
+// Sistema de empregos para Região Metropolitana de Campinas
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum UserRole {
+  CANDIDATE
+  COMPANY
+  ADMIN
+}
+
+enum JobLevel {
+  INTERN      // Estágio
+  APPRENTICE  // Aprendiz
+  JUNIOR
+  MID         // Pleno
+  SENIOR
+}
+
+enum JobModality {
+  ONSITE   // Presencial
+  HYBRID
+  REMOTE
+}
+
+enum ContractType {
+  CLT
+  PJ
+  TEMPORARY   // Temporário
+  INTERNSHIP  // Estágio
+  APPRENTICE  // Aprendiz
+  FREELANCER
+}
+
+enum JobStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  CLOSED
+  EXPIRED
+}
+
+enum ApplicationStatus {
+  PENDING     // Em análise
+  VIEWED
+  CONTACTED   // Chamado
+  REJECTED    // Reprovado
+  HIRED
+}
+
+enum PlanType {
+  FREE
+  BASIC
+  PROFESSIONAL
+  PREMIUM
+}
+
+enum EducationLevel {
+  FUNDAMENTAL
+  MEDIO
+  TECNICO
+  SUPERIOR_INCOMPLETO
+  SUPERIOR
+  POS_GRADUACAO
+  MESTRADO
+  DOUTORADO
+}
+
+// ==========================================
+// CIDADES DA RMC
+// ==========================================
+
+model City {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  
+  // Relacionamentos
+  candidateResidence    Candidate[]    @relation("CandidateResidence")
+  candidateWorkCities   CandidateCity[]
+  companyLocations      CompanyCity[]
+  jobLocations          JobCity[]
+  
+  @@map("cities")
+}
+
+// ==========================================
+// USUÁRIOS
+// ==========================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  role          UserRole  @default(CANDIDATE)
+  emailVerified DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  
+  // LGPD
+  consentedAt       DateTime?
+  consentVersion    String?
+  dataDeletedAt     DateTime?
+  
+  // Relacionamentos
+  candidate   Candidate?
+  company     Company?
+  auditLogs   AuditLog[]
+  
+  @@map("users")
+}
+
+// ==========================================
+// CANDIDATOS
+// ==========================================
+
+model Candidate {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Dados pessoais
+  fullName          String
+  cpf               String?  // Criptografado - LGPD
+  phone             String
+  residenceCityId   String
+  residenceCity     City     @relation("CandidateResidence", fields: [residenceCityId], references: [id])
+  
+  // Perfil profissional
+  desiredPosition   String?
+  level             JobLevel?
+  areaId            String?
+  area              JobArea?  @relation(fields: [areaId], references: [id])
+  experienceYears   Int?
+  education         EducationLevel?
+  salaryMin         Decimal?  @db.Decimal(10, 2)
+  salaryMax         Decimal?  @db.Decimal(10, 2)
+  
+  // Currículo
+  resumeUrl         String?
+  resumeText        String?   @db.Text  // Texto extraído para busca
+  skills            String[]  // Habilidades extraídas por IA
+  
+  // Configurações
+  isPublicProfile   Boolean   @default(false) // Visível para recrutadores
+  receiveAlerts     Boolean   @default(true)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Relacionamentos
+  workCities        CandidateCity[]
+  applications      Application[]
+  favoriteJobs      FavoriteJob[]
+  alerts            CandidateAlert[]
+  experiences       WorkExperience[]
+  educations        Education[]
+  
+  @@map("candidates")
+}
+
+model CandidateCity {
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  cityId      String
+  city        City      @relation(fields: [cityId], references: [id])
+  
+  @@id([candidateId, cityId])
+  @@map("candidate_cities")
+}
+
+model WorkExperience {
+  id           String     @id @default(cuid())
+  candidateId  String
+  candidate    Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  
+  company      String
+  position     String
+  description  String?    @db.Text
+  startDate    DateTime
+  endDate      DateTime?
+  isCurrent    Boolean    @default(false)
+  
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  
+  @@map("work_experiences")
+}
+
+model Education {
+  id           String         @id @default(cuid())
+  candidateId  String
+  candidate    Candidate      @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  
+  institution  String
+  course       String
+  level        EducationLevel
+  startDate    DateTime
+  endDate      DateTime?
+  isCurrent    Boolean        @default(false)
+  
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  
+  @@map("educations")
+}
+
+model CandidateAlert {
+  id           String    @id @default(cuid())
+  candidateId  String
+  candidate    Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  
+  keyword      String?
+  cityId       String?
+  areaId       String?
+  salaryMin    Decimal?  @db.Decimal(10, 2)
+  isActive     Boolean   @default(true)
+  
+  createdAt    DateTime  @default(now())
+  
+  @@map("candidate_alerts")
+}
+
+// ==========================================
+// EMPRESAS
+// ==========================================
+
+model Company {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Dados da empresa
+  legalName     String   // Razão Social
+  tradeName     String   // Nome Fantasia
+  cnpj          String   @unique
+  segmentId     String?
+  segment       Segment? @relation(fields: [segmentId], references: [id])
+  description   String?  @db.Text
+  logoUrl       String?
+  website       String?
+  
+  // Contato
+  phone         String?
+  whatsapp      String?
+  
+  // Status
+  isVerified    Boolean  @default(false)
+  isActive      Boolean  @default(true)
+  
+  // Plano
+  planType      PlanType @default(FREE)
+  planExpiresAt DateTime?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  // Relacionamentos
+  cities        CompanyCity[]
+  jobs          Job[]
+  subscription  Subscription?
+  
+  @@map("companies")
+}
+
+model CompanyCity {
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cityId    String
+  city      City    @relation(fields: [cityId], references: [id])
+  
+  @@id([companyId, cityId])
+  @@map("company_cities")
+}
+
+model Segment {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  companies Company[]
+  
+  @@map("segments")
+}
+
+// ==========================================
+// VAGAS
+// ==========================================
+
+model JobArea {
+  id         String      @id @default(cuid())
+  name       String      @unique
+  slug       String      @unique
+  jobs       Job[]
+  candidates Candidate[]
+  
+  @@map("job_areas")
+}
+
+model Job {
+  id            String       @id @default(cuid())
+  companyId     String
+  company       Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Dados da vaga
+  title         String
+  slug          String
+  description   String       @db.Text
+  requirements  String?      @db.Text
+  benefits      String?      @db.Text
+  
+  areaId        String
+  area          JobArea      @relation(fields: [areaId], references: [id])
+  
+  level         JobLevel
+  modality      JobModality
+  contractType  ContractType
+  
+  // Salário
+  salaryMin     Decimal?     @db.Decimal(10, 2)
+  salaryMax     Decimal?     @db.Decimal(10, 2)
+  hideSalary    Boolean      @default(false) // "A combinar"
+  
+  // Horário
+  workSchedule  String?
+  
+  // Como receber candidaturas
+  applyByPlatform  Boolean   @default(true)
+  applyByWhatsapp  String?
+  applyByEmail     String?
+  applyByUrl       String?   // Site externo
+  
+  // Status e destaque
+  status        JobStatus    @default(DRAFT)
+  isHighlighted Boolean      @default(false)
+  isFeatured    Boolean      @default(false) // Patrocinada
+  
+  // Contadores
+  viewCount     Int          @default(0)
+  
+  // Datas
+  publishedAt   DateTime?
+  expiresAt     DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  // Relacionamentos
+  cities        JobCity[]
+  applications  Application[]
+  favorites     FavoriteJob[]
+  
+  @@unique([companyId, slug])
+  @@index([status, publishedAt])
+  @@index([areaId])
+  @@map("jobs")
+}
+
+model JobCity {
+  jobId  String
+  job    Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  cityId String
+  city   City   @relation(fields: [cityId], references: [id])
+  
+  @@id([jobId, cityId])
+  @@map("job_cities")
+}
+
+// ==========================================
+// CANDIDATURAS
+// ==========================================
+
+model Application {
+  id          String            @id @default(cuid())
+  jobId       String
+  job         Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   Candidate         @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  
+  status      ApplicationStatus @default(PENDING)
+  coverLetter String?           @db.Text
+  
+  // Score de compatibilidade (IA)
+  matchScore  Int?              // 0-100
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  viewedAt    DateTime?
+  
+  @@unique([jobId, candidateId])
+  @@index([status])
+  @@map("applications")
+}
+
+model FavoriteJob {
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobId       String
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  
+  @@id([candidateId, jobId])
+  @@map("favorite_jobs")
+}
+
+// ==========================================
+// PLANOS E PAGAMENTOS
+// ==========================================
+
+model Plan {
+  id              String   @id @default(cuid())
+  name            String   @unique
+  type            PlanType @unique
+  
+  // Limites
+  maxActiveJobs   Int
+  maxJobDays      Int      // Dias de duração da vaga
+  canHighlight    Boolean  @default(false)
+  canFeature      Boolean  @default(false)
+  canSearchResume Boolean  @default(false)
+  
+  // Preço
+  priceMonthly    Decimal  @db.Decimal(10, 2)
+  priceYearly     Decimal? @db.Decimal(10, 2)
+  
+  isActive        Boolean  @default(true)
+  
+  subscriptions   Subscription[]
+  
+  @@map("plans")
+}
+
+model Subscription {
+  id            String    @id @default(cuid())
+  companyId     String    @unique
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId        String
+  plan          Plan      @relation(fields: [planId], references: [id])
+  
+  stripeCustomerId      String?
+  stripeSubscriptionId  String?
+  
+  status        String    @default("active")
+  currentPeriodStart    DateTime
+  currentPeriodEnd      DateTime
+  canceledAt    DateTime?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  payments      Payment[]
+  
+  @@map("subscriptions")
+}
+
+model Payment {
+  id              String       @id @default(cuid())
+  subscriptionId  String
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  
+  stripePaymentId String?
+  amount          Decimal      @db.Decimal(10, 2)
+  status          String
+  paidAt          DateTime?
+  
+  createdAt       DateTime     @default(now())
+  
+  @@map("payments")
+}
+
+// ==========================================
+// AUDITORIA E LOGS
+// ==========================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  
+  action    String
+  entity    String
+  entityId  String?
+  details   Json?
+  ipAddress String?
+  userAgent String?
+  
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ==========================================
+// CONFIGURAÇÕES DO SISTEMA
+// ==========================================
+
+model SystemConfig {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+  
+  @@map("system_configs")
+}
