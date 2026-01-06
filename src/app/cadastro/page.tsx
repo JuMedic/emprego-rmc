@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Briefcase, User, Building2 } from 'lucide-react';
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui';
 import { CandidateRegisterForm } from './CandidateRegisterForm';
 import { CompanyRegisterForm } from './CompanyRegisterForm';
 
-export default function CadastroPage() {
+function CadastroContent() {
   const searchParams = useSearchParams();
   const initialType = searchParams.get('tipo') === 'empresa' ? 'company' : 'candidate';
   const [userType, setUserType] = useState<'candidate' | 'company'>(initialType);
@@ -86,5 +86,13 @@ export default function CadastroPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CadastroPage() {
+  return (
+    <Suspense fallback={<div className="min-h-[80vh] flex items-center justify-center"><div className="animate-spin h-8 w-8 border-4 border-blue-600 border-t-transparent rounded-full"></div></div>}>
+      <CadastroContent />
+    </Suspense>
   );
 }
